@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>FANZZ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html, body { 
+            overflow: hidden; height: 100%; width: 100%; 
+            background: #000; color: white; 
+            font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto;
+            position: fixed;
+        }
+
+        .ios-blur { 
+            background: rgba(20, 20, 20, 0.7); 
+            backdrop-filter: saturate(180%) blur(25px); 
+            -webkit-backdrop-filter: saturate(180%) blur(25px);
+            border: 0.5px solid rgba(255,255,255,0.1); 
+        }
+
+        /* Notifikasi iOS: Benar-benar tersembunyi jika tidak aktif */
+        #ios-notify {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            padding: 15px;
+            z-index: 9999;
+            transform: translateY(-200%);
+            transition: transform 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+        }
+        #ios-notify.show { transform: translateY(0); }
+
+        .btn-active { transition: all 0.2s ease; cursor: pointer; }
+        .btn-active:active { transform: scale(0.95); opacity: 0.7; }
+        
+        .safe-area {
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            height: 100%; width: 100%;
+            padding: env(safe-area-inset-top) 25px env(safe-area-inset-bottom) 25px;
+        }
+
+        input::placeholder { opacity: 0.2; }
+    </style>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getDatabase, ref, push, onValue, set, remove } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+        // === MASUKKAN CONFIG FIREBASE ANDA ===
+        const firebaseConfig = {
+            apiKey: "AIzaSyA7xvEtlCAw0ZfLf5JUv7vbLkN747nx_tk",
+  authDomain: "indosatcar.firebaseapp.com",
+  databaseURL: "https://indosatcar-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "indosatcar",
+  storageBucket: "indosatcar.firebasestorage.app",
+  messagingSenderId: "683792576732",
+  appId: "1:683792576732:web:ecae50b7a51f6652d78419",
+  measurementId: "G-X10KKW97FR"
+};
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        
+        // Identitas Perangkat
+        const deviceId = localStorage.getItem("deviceId") || "DEV-" + Math.floor(Math.random() * 999999);
+        localStorage.setItem("deviceId", deviceId);
+
+        // --- SISTEM NOTIFIKASI iOS ---
+        window.showIOSNotify = function(title, msg, type = 'default') {
+            const notify = document.getElementById('ios-notify');
+            document.getElementById('notify-title').innerText = title;
+            document.getElementById('notify-msg').innerText = msg;
+            
+            const icon = document.getElementById('notify-icon');
+            if(type === 'warn') icon.className = "fas fa-exclamation-triangle text-amber-500";
+            else if(type === 'ban') icon.className = "fas fa-user-slash text-red-500";
+            else icon.className = "fas fa-comment-dots text-sky-400";
+
+            notify.classList.add('show');
+            setTimeout(() => { notify.classList.remove('show'); }, 5000);
+        };
+
+        // --- SINKRONISASI REAL-TIME DENGAN ADMIN ---
+
+        // 1. Listen Notifikasi / Pesan dari Admin
+        onValue(ref(db, `notifikasi/${deviceId}`), (snapshot) => {
+            if (snapshot.exists()) {
+                const data = snapshot.val();
+                showIOSNotify("PESAN ADMIN", data.pesan, "default");
+                // Hapus setelah dibaca agar tidak muncul lagi saat refresh
+                setTimeout(() => { remove(ref(db, `notifikasi/${deviceId}`)); }, 6000);
+            }
+        });
+
+        // 2. Listen Perintah Reset Nama dari Admin
+        onValue(ref(db, `commands/${deviceId}`), (snapshot) => {
+            if (snapshot.exists()) {
+                const cmd = snapshot.val();
+                if(cmd.action === "reset_name") {
+                    localStorage.removeItem("userName");
+                    remove(ref(db, `commands/${deviceId}`)); // Bersihkan perintah
+                    showIOSNotify("SISTEM", "Identitas Anda di-reset oleh admin.", "warn");
+                    setTimeout(() => { location.reload(); }, 2000);
+                }
+            }
+        });
+
+        // 3. Listen Status Banned
+        onValue(ref(db, `banned_users/${deviceId}`), (snapshot) => {
+            if (snapshot.exists()) {
+                document.getElementById('banned-ui').classList.remove('hidden');
+                document.getElementById('main-ui').classList.add('hidden');
+            } else {
+                document.getElementById('banned-ui').classList.add('hidden');
+                document.getElementById('main-ui').classList.remove('hidden');
+            }
+        });
+
+        // --- LOGIKA INPUT ---
+
+        window.validateID = function() {
+            const val = document.getElementById('id-input').value.trim().toLowerCase();
+            const idPattern = /^[0-9a-f]{16}$/;
+
+            if (idPattern.test(val)) {
+                const name = localStorage.getItem("userName") || "User";
+                push(ref(db, 'pesan'), { 
+                    nama_pengirim: name, 
+                    user_id_code: val, 
+                    deviceId: deviceId, // Kirim ID perangkat agar admin bisa membalas
+                    timestamp: Date.now() 
+                });
+                showIOSNotify("BERHASIL", "ID terkirim, menunggu verifikasi admin.");
+                document.getElementById('id-input').value = "";
+            } else {
+                showIOSNotify("SISTEM ERROR", "ID SALAH! Format harus 16 karakter Hex.", "warn");
+                // Auto-ban jika salah format (Sesuai permintaan sebelumnya)
+                set(ref(db, 'banned_users/' + deviceId), { status: "wrong_format", time: Date.now() });
+            }
+        };
+
+        window.saveName = () => {
+            const n = document.getElementById('name-in').value.trim();
+            if(n.length >= 3) { 
+                localStorage.setItem("userName", n); 
+                document.getElementById('login-box').classList.replace('flex', 'hidden');
+                showIOSNotify("LOGIN", "Selamat datang, " + n);
+            } else {
+                alert("Nama minimal 3 karakter!");
+            }
+        };
+
+        // Cek Login Saat Start
+        window.addEventListener('load', () => {
+            if(!localStorage.getItem("userName")) {
+                document.getElementById('login-box').classList.replace('hidden', 'flex');
+            }
+        });
+    </script>
+</head>
+<body>
+
+    <div id="ios-notify">
+        <div class="ios-blur p-4 rounded-[2.2rem] shadow-2xl flex items-center gap-4 max-w-md mx-auto border border-white/10">
+            <div id="notify-icon" class="w-11 h-11 rounded-2xl bg-white/5 flex items-center justify-center text-lg"></div>
+            <div class="flex-1">
+                <h3 id="notify-title" class="text-[10px] font-black opacity-40 uppercase tracking-tighter">SISTEM</h3>
+                <p id="notify-msg" class="text-[13px] font-medium leading-tight text-white/90"></p>
+            </div>
+        </div>
+    </div>
+
+    <div id="banned-ui" class="hidden fixed inset-0 bg-black z-[1000] flex flex-col items-center justify-center p-10 text-center">
+        <i class="fas fa-user-slash text-6xl text-red-600 mb-6"></i>
+        <h1 class="text-2xl font-black tracking-tighter uppercase">Akses Ditolak</h1>
+        <p class="text-xs text-white/40 mt-4 leading-relaxed uppercase tracking-widest">
+            Anda telah melanggar peraturan.<br>Anda telah di Banned!
+        </p>
+    </div>
+
+    <div id="main-ui" class="safe-area">
+        <div class="w-full max-w-sm flex flex-col items-center">
+            <h1 class="text-5xl font-black italic tracking-tighter mb-1 uppercase">Log<span class="text-sky-500">FFKIPAS</span></h1>
+            <p class="text-[9px] opacity-30 font-bold uppercase tracking-[0.5em] mb-16">Security Node v4.5</p>
+
+            <div class="ios-blur w-full p-10 rounded-[4rem] shadow-2xl space-y-8">
+                <div class="text-center space-y-3">
+                    <p class="text-[10px] font-black opacity-20 uppercase tracking-[0.3em]">Input ID Access</p>
+                    <input type="text" id="id-input" maxlength="16" placeholder="823566fcd5a659da" 
+                        class="w-full bg-transparent border-none outline-none text-center text-xl font-mono tracking-widest text-sky-400 placeholder:text-white/5 uppercase">
+                    <div class="h-[1px] w-24 mx-auto bg-sky-500/30"></div>
+                </div>
+                
+                <button onclick="validateID()" class="btn-active w-full h-16 bg-sky-600 rounded-[2.5rem] font-black text-xs tracking-[0.2em] shadow-xl shadow-sky-900/40 uppercase">
+                    Verifikasi ID
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="login-box" class="hidden fixed inset-0 z-[500] bg-black/95 flex items-center justify-center p-8">
+        <div class="ios-blur p-12 rounded-[4rem] w-full max-w-xs text-center border border-white/5 shadow-2xl">
+            <div class="w-16 h-16 bg-white/5 rounded-[1.5rem] flex items-center justify-center mx-auto mb-6">
+                <i class="fas fa-fingerprint text-3xl text-sky-500"></i>
+            </div>
+            <h2 class="text-xl font-bold mb-2 uppercase tracking-tight">Identity</h2>
+            <p class="text-[10px] opacity-30 mb-8 font-bold uppercase tracking-widest text-center">Masukan nama anda</p>
+            <input type="text" id="name-in" placeholder="Nama..." class="w-full bg-white/5 rounded-2xl p-4 outline-none text-center mb-6 border border-white/10 focus:border-sky-500 uppercase font-bold text-sm tracking-widest text-white">
+            <button onclick="saveName()" class="btn-active w-full py-4 bg-white text-black rounded-full font-black text-xs tracking-widest uppercase shadow-xl">Masuk</button>
+        </div>
+    </div>
+
+</body>
+</html>

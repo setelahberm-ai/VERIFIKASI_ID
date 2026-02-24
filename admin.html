@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Admin Panel v4.5</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { 
+            overflow: hidden; height: 100%; width: 100%; 
+            background: #020617; color: white; 
+            font-family: -apple-system, system-ui, sans-serif;
+            position: fixed;
+        }
+
+        .glass { 
+            background: rgba(15, 23, 42, 0.8); 
+            backdrop-filter: blur(30px); 
+            -webkit-backdrop-filter: blur(30px);
+            border: 1px solid rgba(255,255,255,0.05); 
+        }
+
+        .list-area {
+            height: 60vh;
+            overflow-y: auto;
+            scrollbar-width: none;
+            padding-bottom: 20px;
+        }
+        .list-area::-webkit-scrollbar { display: none; }
+
+        .btn-click { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; }
+        .btn-click:active { transform: scale(0.92); opacity: 0.7; }
+        
+        .nav-active { color: #38bdf8; text-shadow: 0 0 12px rgba(56, 189, 248, 0.5); opacity: 1 !important; }
+        .hidden { display: none !important; }
+    </style>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getDatabase, ref, onValue, remove, set } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+        // === MASUKKAN CONFIG FIREBASE ANDA ===
+        const firebaseConfig = {
+            apiKey: "AIzaSyA7xvEtlCAw0ZfLf5JUv7vbLkN747nx_tk",
+  authDomain: "indosatcar.firebaseapp.com",
+  databaseURL: "https://indosatcar-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "indosatcar",
+  storageBucket: "indosatcar.firebasestorage.app",
+  messagingSenderId: "683792576732",
+  appId: "1:683792576732:web:ecae50b7a51f6652d78419",
+  measurementId: "G-X10KKW97FR"
+};
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        // Render Loop
+        onValue(ref(db), (snapshot) => {
+            const data = snapshot.val() || {};
+            const pesan = data.pesan || {};
+            const banned = data.banned_users || {};
+
+            const containerDB = document.getElementById('render-db');
+            const containerUser = document.getElementById('render-user');
+            const containerBanned = document.getElementById('render-banned');
+
+            containerDB.innerHTML = ""; containerUser.innerHTML = ""; containerBanned.innerHTML = "";
+
+            // 1. DATA & USERS (SINKRON)
+            Object.keys(pesan).reverse().forEach(key => {
+                const item = pesan[key];
+                const uId = item.deviceId; // ID Perangkat User
+
+                containerDB.innerHTML += `
+                    <div class="glass p-5 rounded-[2.5rem] mb-4 border border-white/5">
+                        <code class="text-sky-400 font-mono text-sm tracking-widest block text-center mb-4 uppercase">${item.user_id_code}</code>
+                        <div class="flex gap-2">
+                            <button onclick="copy('${item.user_id_code}')" class="btn-click flex-1 py-3 bg-white/5 rounded-2xl text-[10px] font-black uppercase tracking-widest">Salin ID</button>
+                            <button onclick="hapusData('${key}')" class="btn-click w-14 py-3 bg-red-500/10 text-red-500 rounded-2xl flex items-center justify-center"><i class="fas fa-trash-alt"></i></button>
+                        </div>
+                    </div>`;
+
+                containerUser.innerHTML += `
+                    <div class="glass p-5 rounded-[2.5rem] mb-4 flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-2xl bg-sky-500/10 flex items-center justify-center text-sky-400 font-bold">${(item.nama_pengirim || 'U').charAt(0).toUpperCase()}</div>
+                        <div class="flex-1">
+                            <h4 class="text-xs font-black uppercase tracking-tight">${item.nama_pengirim || 'Unknown'}</h4>
+                            <p class="text-[8px] font-mono text-slate-500 mt-1">Dev: ${uId}</p>
+                        </div>
+                        <button onclick="pindahkanKeBan('${uId}')" class="text-red-500 text-xs px-3 py-2 bg-red-500/10 rounded-xl font-bold">BAN</button>
+                    </div>`;
+            });
+
+            // 2. BANNED LIST
+            Object.keys(banned).forEach(devId => {
+                containerBanned.innerHTML += `
+                    <div class="glass p-6 rounded-[2.8rem] mb-5 border border-red-500/20">
+                        <div class="flex justify-between items-center mb-5">
+                            <span class="text-[9px] font-black text-red-500 uppercase tracking-widest italic">${devId}</span>
+                            <button onclick="unban('${devId}')" class="btn-click bg-green-500 text-black px-5 py-2 rounded-full text-[9px] font-black uppercase">Unban</button>
+                        </div>
+                        <div class="space-y-3">
+                            <input type="text" id="warn-${devId}" placeholder="Pesan Peringatan..." class="w-full bg-black/50 border border-white/5 rounded-2xl p-4 text-xs outline-none focus:border-sky-500">
+                            <div class="flex gap-2">
+                                <button onclick="kirimPesan('${devId}')" class="btn-click flex-1 py-4 bg-sky-600 rounded-2xl text-[9px] font-black uppercase">Kirim Pesan</button>
+                                <button onclick="resetNama('${devId}')" class="btn-click px-5 py-4 bg-amber-500/20 text-amber-500 border border-amber-500/20 rounded-2xl text-[9px] font-black"><i class="fas fa-undo"></i></button>
+                            </div>
+                        </div>
+                    </div>`;
+            });
+        });
+
+        // Global Actions
+        window.copy = (t) => { navigator.clipboard.writeText(t); alert("ID Copied!"); };
+        window.hapusData = (key) => remove(ref(db, `pesan/${key}`));
+        window.unban = (id) => remove(ref(db, `banned_users/${id}`));
+        window.unbanAll = () => confirm("Hapus semua banned?") && remove(ref(db, 'banned_users'));
+        
+        window.pindahkanKeBan = (id) => {
+            set(ref(db, `banned_users/${id}`), { status: "manual_ban", time: Date.now() });
+        };
+
+        window.kirimPesan = (id) => {
+            const input = document.getElementById(`warn-${id}`);
+            if(!input.value) return;
+            set(ref(db, `notifikasi/${id}`), { pesan: input.value, time: Date.now() }).then(() => {
+                alert("Pesan Berhasil Terkirim!");
+                input.value = "";
+            });
+        };
+
+        window.resetNama = (id) => {
+            if(confirm("Reset Nama user ini?")) {
+                set(ref(db, `commands/${id}`), { action: "reset_name", time: Date.now() }).then(() => {
+                    alert("Perintah Reset Terkirim!");
+                });
+            }
+        };
+
+        window.wipeAll = () => {
+            if(confirm("HAPUS SELURUH DATABASE PESAN?")) remove(ref(db, 'pesan'));
+        }
+    </script>
+</head>
+<body class="flex flex-col h-full">
+
+    <header class="p-8 pt-12 flex justify-between items-center w-full max-w-lg mx-auto">
+        <div>
+            <h1 class="text-3xl font-black italic tracking-tighter uppercase">Admin<span class="text-sky-500">.Sync</span></h1>
+            <p class="text-[8px] font-bold opacity-30 tracking-[0.6em] uppercase">Control Matrix</p>
+        </div>
+        <button onclick="unbanAll()" class="btn-click w-12 h-12 glass rounded-2xl flex items-center justify-center text-green-500 shadow-lg">
+            <i class="fas fa-user-check text-lg"></i>
+        </button>
+    </header>
+
+    <main class="flex-1 px-8 w-full max-w-lg mx-auto">
+        <div id="room-db">
+            <p class="text-[9px] font-black text-slate-600 uppercase mb-5 tracking-widest ml-1">Database ID</p>
+            <div id="render-db" class="list-area"></div>
+        </div>
+
+        <div id="room-user" class="hidden">
+            <p class="text-[9px] font-black text-slate-600 uppercase mb-5 tracking-widest ml-1">Verified Users</p>
+            <div id="render-user" class="list-area"></div>
+        </div>
+
+        <div id="room-banned" class="hidden">
+            <p class="text-[9px] font-black text-red-500 uppercase mb-5 tracking-widest ml-1 text-center">Prison System</p>
+            <div id="render-banned" class="list-area"></div>
+        </div>
+
+        <div id="room-sys" class="hidden">
+            <div class="glass p-12 rounded-[3.5rem] border border-red-500/10 text-center mt-10">
+                <i class="fas fa-radiation text-4xl text-red-600 mb-8"></i>
+                <button onclick="wipeAll()" class="btn-click w-full py-5 bg-red-600/10 text-red-500 rounded-3xl font-black text-[10px] tracking-widest border border-red-500/20">
+                    WIPE ALL DATABASE
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <nav class="p-8 pb-10 w-full max-w-lg mx-auto">
+        <div class="glass h-20 rounded-[2.8rem] flex items-center justify-around shadow-2xl overflow-hidden">
+            <button onclick="tab('db', this)" class="btn-click nav-active flex flex-col items-center gap-1 opacity-40">
+                <i class="fas fa-database text-lg"></i>
+                <span class="text-[7px] font-black">DATA</span>
+            </button>
+            <button onclick="tab('user', this)" class="btn-click flex flex-col items-center gap-1 opacity-40">
+                <i class="fas fa-id-card text-lg"></i>
+                <span class="text-[7px] font-black">USER</span>
+            </button>
+            <button onclick="tab('banned', this)" class="btn-click flex flex-col items-center gap-1 opacity-40">
+                <i class="fas fa-user-slash text-lg"></i>
+                <span class="text-[7px] font-black">BAN</span>
+            </button>
+            <button onclick="tab('sys', this)" class="btn-click flex flex-col items-center gap-1 opacity-40">
+                <i class="fas fa-cog text-lg"></i>
+                <span class="text-[7px] font-black">SET</span>
+            </button>
+        </div>
+    </nav>
+
+    <script>
+        function tab(room, el) {
+            ['room-db', 'room-user', 'room-banned', 'room-sys'].forEach(t => document.getElementById(t).classList.add('hidden'));
+            document.getElementById('room-' + room).classList.remove('hidden');
+            document.querySelectorAll('nav button').forEach(btn => btn.classList.remove('nav-active'));
+            el.classList.add('nav-active');
+        }
+    </script>
+</body>
+</html>
